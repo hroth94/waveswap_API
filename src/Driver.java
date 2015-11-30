@@ -8,37 +8,40 @@ public class Driver {
 		SenderParser sender = new SenderParser();
 		// Put file bytes into fileData byte array
 		byte[] fileData = "TEST".getBytes();
-		sender.createAudioFile(fileData, "C:\\Users\\Matthew\\Documents\\Test.wav", 2, 14000, 500, 5512, SenderParser.BIT_BY_BIT);
-		//float[][] data = sender.createData(fileData, 1, 1, 1, 2);
-		//byte[] returnBytes = ReceiverParser.decodeData(data, fileData.length, 1, 1, 1);
+		sender.createAudioFile(fileData, "C:\\Users\\Matthew\\Documents\\Test.wav", 1, 14000, 500, 5512, SenderParser.BIT_BY_BIT);
 		
-		/*
-		float[] frequencies = {14000f, 14500f, 15000f};
-		//float[] frequencies = {14000f};
-		float[] phis = new float[frequencies.length];
-		float[][] buffer = new float[2][44100 * 5];
-		//float change = 3000f / 44100f;
-		for(int i = 0; i < buffer[0].length; i++){
-			buffer[0][i] = buffer[1][i] = 0;
-			for(int f = 0; f < frequencies.length; f++)
-			{
-				//frequencies[f] += change * f %2 == 0 ? 1 : -1;
-				phis[f] += 2*Math.PI*frequencies[f]*(1f/44100f);
-				buffer[0][i] = buffer[1][i] += (float)Math.sin(phis[f])/frequencies.length;
-			}
-		}
-		
-		WavFileReaderWriter wfrw = new WavFileReaderWriter();
-		try {
-			SampleAudioFormat format = new SampleAudioFormat(44100, 16, 2, true, true);
-			wfrw.writeAudioFile(buffer, "C:\\Users\\theholypiggy\\Documents\\Test.wav", AudioFileType.WAV, format);
-		} catch (IOException e) {
-			e.printStackTrace();
-		} catch (OperationUnsupportedException e) {
-			e.printStackTrace();
-		} catch (FileFormatException e) {
-			e.printStackTrace();
-		}*/
+		/**
+		 * For this transmission testing, using the following values for the audio file:
+		 * transmissionSpeed = 1
+		 * lowFrequency = 14000
+		 * sensitivity = 500
+		 * 
+		 * We should see the following frequencies picked up by the microphone:
+		 * 14000 15000 14500 15000 14000 15000 (LOCATOR)
+		 * 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000
+		 * 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 15000 (DESCRIPTOR - 1 (TRANSMISSION SPEED))
+		 * 14000 15000 14500 14000 14500 15000 14000 14500 14000 15000 14500 15000 14000 14500 15000 14500
+		 * 15000 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 (DESCRIPTOR - 14000 (LOW FREQUENCY))
+		 * 14500 15000 14500 14000 14500 14000 15000 14000 15000 14000 15000 14000 15000 14500 15000 14500
+		 * 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 (DESCRIPTOR - 500 (SENSITIVITY))
+		 * 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500
+		 * 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 14000 14500 15000 14500 (DESCRIPTOR - 2 (METHOD))
+		 * 14000 15000 14500 15000 14500 15000 14500 14000 14500 15000 14500 14000 14500 15000 14500 15000
+		 * 14500 15000 14500 15000 14500 14000 15000 14000 14500 15000 14500 15000 14500 15000 14500 14000 (DATA - "TEST")
+		 * 
+		 * Which corresponds to the following values assuming the range of the microphone is 14000 - 15000:
+		 * 1 4 2 4 1 4 (LOCATOR)
+		 * 2 1 2 1 2 1 2 1 2 1 2 1 2 1 2 1 - (0000000000000000)
+		 * 2 1 2 1 2 1 2 1 2 1 2 1 2 1 2 4 - (0000000000000001) (DESCRIPTOR 1)
+		 * 2 4 2 1 2 4 1 2 1 4 2 4 1 2 4 2 - (0100011001011010)
+		 * 4 1 2 1 2 1 2 1 2 1 2 1 2 1 2 1 - (1100000000000000) (DESCRIPTOR 14000)
+		 * 2 4 2 1 2 1 4 1 4 1 4 1 4 2 4 2 - (0100001111111010)
+		 * 1 2 1 2 1 2 1 2 1 2 1 2 1 2 1 2 - (0000000000000000) (DESCRIPTOR 500)
+		 * 1 2 1 2 1 2 1 2 1 2 1 2 1 2 1 2 - (0000000000000000)
+		 * 1 2 1 2 1 2 1 2 1 2 1 2 1 2 4 2 - (0000000000000010) (DESCRIPTOR 2)
+		 * 1 4 2 4 2 4 2 1 2 4 2 1 2 4 2 4 - (0101010001000101)
+		 * 2 4 2 4 2 1 4 1 2 4 2 4 2 4 2 1 - (0101001101010100) (DATA "TEST")
+		 */
 		
 		return;
 	}

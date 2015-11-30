@@ -1,5 +1,6 @@
 import java.io.*;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 
 import net.beadsproject.beads.data.SampleAudioFormat;
 import net.beadsproject.beads.data.audiofile.AudioFileType;
@@ -33,11 +34,37 @@ public class SenderParser {
 	public static float[] transmissionLocator = {14000, 15000, 14500, 15000, 14000, 15000 };
 	                                             //1,      4,     2,     4,     1,     4
 	
-	private double currentPhi;
+	private ArrayList<Phi> phiList;
+	private static final int DIRECT_PHI = 0;
 	
 	public SenderParser() {
-		currentPhi = 0;
+		phiList = new ArrayList<Phi>();
+		phiList.add(new Phi(0));
 	}
+	
+	//----------PHI METHODS
+	
+	public void resetPhiList() {
+	    phiList = new ArrayList<Phi>();
+	    phiList.add(new Phi(0));
+	}
+	
+	
+	
+	public Phi getPhi(int index) {
+	    
+	    if(index >= phiList.size()) {
+	        for(int i = phiList.size(); i <= index; i++) {
+	            phiList.add(new Phi(0));
+	        }
+	    }
+	    
+	    
+	    return phiList.get(index);
+	}
+	
+	//----------END PHI METHODS
+	
 	//FOR TESTS:
 	//TransmissionSpeed = 1, LowFrequency = 14000, Sensitivity = 500, Method = 2
 
@@ -199,10 +226,15 @@ public class SenderParser {
 	private float[][] createSineWaveDirect(float[] frequencies, float lowFrequency)
 	{
 		float[][] buffer = new float[1][frequencies.length];
-		
+		float lastFrequency = 0;
 		for(int i = 0; i < frequencies.length; i++) {
-			currentPhi += 2*Math.PI*1.0/sampleRate*frequencies[i];
-			buffer[0][i] = (float)Math.sin(currentPhi);
+		    if(frequencies[i] != lastFrequency) {
+		        //System.out.println("F: " + frequencies[i]);
+		    }
+		    lastFrequency = frequencies[i];
+		    Phi currentPhi = getPhi(DIRECT_PHI);
+			currentPhi.addToValue(2*Math.PI*1.0/sampleRate*frequencies[i]);
+			buffer[0][i] = (float)Math.sin(currentPhi.getValue());
 		}
 				
 		return buffer;
@@ -225,8 +257,6 @@ public class SenderParser {
 	 *             (where lf = lowFrequency and s = sensitivity)
 	 *            lf+1*s lf lf+1*s lf+2*s lf lf+2*s lf+1*s lf+2*s
 	 *            Since lf = repeat, lf+1*s = 0, lf+2*s = 1
-	 *            
-	 *            MULTIPLE PHI's!!!!!!!!!!!!!!!!!!!!!!!! TODO
 	 */
 	private float[][] createSineWaveBitByBit(float[] rawFrequencies, float lowFrequency, float sensitivity, int numChannels)
 	{
@@ -239,7 +269,11 @@ public class SenderParser {
 		int frequenciesPerChannel = totalFrequencies / numChannels;
 		
 		float[] frequencies = new float[totalFrequencies];
+		float prevRaw = 0;
 		for(int i = 0; i < numFrequencies; i++) {
+		    if(prevRaw != rawFrequencies[i])
+		    System.out.println("Raw: " + rawFrequencies[i]);
+		    prevRaw = rawFrequencies[i];
 			frequencies[i] = rawFrequencies[i];
 		}
 		for(int i = numFrequencies; i < totalFrequencies; i++) {
@@ -256,6 +290,7 @@ public class SenderParser {
 		int numChannelsPlaying = 0;
 		float targetFrequency = lowFrequency + sensitivity * 2;
 		boolean wasTargetFrequency = false;
+		float prevFrequency = 0;
 		for(int i = 0; i < frequencies.length; i++)
 		{
 			float frequency = frequencies[i];
@@ -267,8 +302,12 @@ public class SenderParser {
 				//Channel 0: lowFrequency + sensitivity
 				//Channel 1: lowFrequency + 2*sensitivity, etc.
 				relevantFrequency = lowFrequency + sensitivity * (currentChannel + 1);
-				currentPhi += 2*Math.PI*1.0/sampleRate*relevantFrequency;
-				buffer[currentChannel][currentFrequency] = (float)Math.sin(currentPhi);
+				if(prevFrequency != relevantFrequency)
+				System.out.println("F[" + currentChannel + "]: " + relevantFrequency);
+				prevFrequency = relevantFrequency;
+				Phi currentPhi = getPhi(currentChannel);
+				currentPhi.addToValue(2*Math.PI*1.0/sampleRate*relevantFrequency);
+				buffer[currentChannel][currentFrequency] = (float)Math.sin(currentPhi.getValue());
 				wasTargetFrequency = true;
 				numChannelsPlaying += 1;
 			}
@@ -282,8 +321,12 @@ public class SenderParser {
 			if(currentChannel >= numChannels)
 			{
 				if(numChannelsPlaying == 0) {
-					currentPhi += 2*Math.PI*1.0/sampleRate*(lowFrequency);
-					buffer[0][currentFrequency] = (float)Math.sin(currentPhi);
+				    Phi currentPhi = getPhi(currentChannel);
+				    if(prevFrequency != lowFrequency)
+				    System.out.println("F[!]: " + lowFrequency);
+				    prevFrequency = lowFrequency;
+					currentPhi.addToValue(2*Math.PI*1.0/sampleRate*(lowFrequency));
+					buffer[0][currentFrequency] = (float)Math.sin(currentPhi.getValue());
 				}
 				currentChannel = 0;
 				currentFrequency += 1;
@@ -311,36 +354,38 @@ public class SenderParser {
 	 */
 	public void createAudioFile(byte[] bytes, String filePath,
 			int transmissionSpeed, float lowFrequency, float sensitivity, int replication, int method) {
+	    
+	    resetPhiList();
 		
 		float[] parsedLocator = createLocator(replication);
 		float[] parsedDescriptor = createDescriptor(transmissionSpeed, lowFrequency, sensitivity, replication, method);
-		//float[] parsedData = createData(bytes, method == BIT_BY_BIT ? 1 : transmissionSpeed, lowFrequency, sensitivity, replication);
+		float[] parsedData = createData(bytes, method == BIT_BY_BIT ? 1 : transmissionSpeed, lowFrequency, sensitivity, replication);
 		
 		float[][] locator = createSineWave(parsedLocator, 1, lowFrequency, sensitivity, DIRECT);
 		float[][] descriptor = createSineWave(parsedDescriptor, 1, lowFrequency, sensitivity, DIRECT);
-		//float[][] data = createSineWave(parsedData, transmissionSpeed, lowFrequency, sensitivity, method);
-		float[][] transmission = new float[1][locator[0].length + descriptor[0].length];
-		//float[][] transmission = new float[data.length][locator[0].length + descriptor[0].length + data[0].length];
+		float[][] data = createSineWave(parsedData, transmissionSpeed, lowFrequency, sensitivity, method);
+		//float[][] transmission = new float[1][locator[0].length + descriptor[0].length];
+		float[][] transmission = new float[data.length][locator[0].length + descriptor[0].length + data[0].length];
 
 		for(int i = 0; i < locator.length; i++) {
-			for(int j = 0; j < locator[0].length; j++) {
+			for(int j = 0; j < locator[i].length; j++) {
 				transmission[i][j] = locator[i][j];
 			}
 		}
 		
 		for (int i = 0; i < descriptor.length; i++) {
-			for (int j = 0; j < descriptor[0].length; j++)
+			for (int j = 0; j < descriptor[i].length; j++)
 			{
-				transmission[i][j+locator[0].length] = descriptor[i][j];
+				transmission[i][j+locator[i].length] = descriptor[i][j];
 			}
 		}
-		/*
+		
 		for (int i = 0; i < data.length; i++) {
-			for (int j = 0; j < data[0].length; j++)
+			for (int j = 0; j < data[i].length; j++)
 			{
-				transmission[i][j+locator[0].length+descriptor[0].length] = data[i][j];
+				transmission[i][j+locator[i].length+descriptor[i].length] = data[i][j];
 			}
-		}*/
+		}
 
 		WavFileReaderWriter wfrw = new WavFileReaderWriter();
 		try {
