@@ -32,6 +32,14 @@ public class SenderParser {
 	public static float   transmissionHighFrequency = 15000;
 	public static float[] transmissionLocator = {14000, 15000, 14500, 15000, 14000, 15000 };
 	                                             //1,      4,     2,     4,     1,     4
+	
+	private double currentPhi;
+	
+	public SenderParser() {
+		currentPhi = 0;
+	}
+	//FOR TESTS:
+	//TransmissionSpeed = 1, LowFrequency = 14000, Sensitivity = 500, Method = 2
 
 	public float[] createLocator(int replicationAmount) {
 		float[] data = new float[transmissionLocator.length * replicationAmount];
@@ -151,7 +159,7 @@ public class SenderParser {
 	//The data in frequencies should have the replication amount reflect the 
 	//amount of time that the user would like to play the sound, so no need to worry
 	//about that.
-	private static float[][] createSineWave(float[] frequencies, int transmissionSpeed, float lowFrequency, float sensitivity, int method)
+	private float[][] createSineWave(float[] frequencies, int transmissionSpeed, float lowFrequency, float sensitivity, int method)
 	{
 		if(method == DIRECT)
 		{
@@ -188,16 +196,15 @@ public class SenderParser {
 		return null;
 	}
 	
-	private static float[][] createSineWaveDirect(float[] frequencies, float lowFrequency)
+	private float[][] createSineWaveDirect(float[] frequencies, float lowFrequency)
 	{
 		float[][] buffer = new float[1][frequencies.length];
-		double phi = 0;
 		
 		for(int i = 0; i < frequencies.length; i++) {
-			phi += 2*Math.PI*1.0/sampleRate*frequencies[i];
-			buffer[0][i] = (float)Math.sin(phi);
+			currentPhi += 2*Math.PI*1.0/sampleRate*frequencies[i];
+			buffer[0][i] = (float)Math.sin(currentPhi);
 		}
-		
+				
 		return buffer;
 	}
 
@@ -218,8 +225,10 @@ public class SenderParser {
 	 *             (where lf = lowFrequency and s = sensitivity)
 	 *            lf+1*s lf lf+1*s lf+2*s lf lf+2*s lf+1*s lf+2*s
 	 *            Since lf = repeat, lf+1*s = 0, lf+2*s = 1
+	 *            
+	 *            MULTIPLE PHI's!!!!!!!!!!!!!!!!!!!!!!!! TODO
 	 */
-	private static float[][] createSineWaveBitByBit(float[] rawFrequencies, float lowFrequency, float sensitivity, int numChannels)
+	private float[][] createSineWaveBitByBit(float[] rawFrequencies, float lowFrequency, float sensitivity, int numChannels)
 	{
 		int numFrequencies = rawFrequencies.length;
 		//Determine how much padding is needed for the channel conversion
@@ -238,7 +247,6 @@ public class SenderParser {
 		}
 		
 		float[][] buffer = new float[numChannels][frequenciesPerChannel];
-		double phi = 0;
 		
 		//Add the frequency to the buffer if it is equivalent to a "1", and not if it is equivalent
 		//to a "0".  If no frequencies are "1", play "lowFrequency" on Channel 0.  Channel 0 plays at "lowFrequency + sensitivity",
@@ -259,8 +267,8 @@ public class SenderParser {
 				//Channel 0: lowFrequency + sensitivity
 				//Channel 1: lowFrequency + 2*sensitivity, etc.
 				relevantFrequency = lowFrequency + sensitivity * (currentChannel + 1);
-				phi += 2*Math.PI*1.0/sampleRate*relevantFrequency;
-				buffer[currentChannel][currentFrequency] = (float)Math.sin(phi);
+				currentPhi += 2*Math.PI*1.0/sampleRate*relevantFrequency;
+				buffer[currentChannel][currentFrequency] = (float)Math.sin(currentPhi);
 				wasTargetFrequency = true;
 				numChannelsPlaying += 1;
 			}
@@ -274,8 +282,8 @@ public class SenderParser {
 			if(currentChannel >= numChannels)
 			{
 				if(numChannelsPlaying == 0) {
-					phi += 2*Math.PI*1.0/sampleRate*(lowFrequency);
-					buffer[0][currentFrequency] = (float)Math.sin(phi);
+					currentPhi += 2*Math.PI*1.0/sampleRate*(lowFrequency);
+					buffer[0][currentFrequency] = (float)Math.sin(currentPhi);
 				}
 				currentChannel = 0;
 				currentFrequency += 1;
@@ -286,7 +294,7 @@ public class SenderParser {
 		return buffer;
 	}
 	
-	private static float[][] createSineWaveCascade(float[] frequencies)
+	private float[][] createSineWaveCascade(float[] frequencies)
 	{
 		return null;
 	}
@@ -305,13 +313,13 @@ public class SenderParser {
 			int transmissionSpeed, float lowFrequency, float sensitivity, int replication, int method) {
 		
 		float[] parsedLocator = createLocator(replication);
-		//float[] parsedDescriptor = createDescriptor(transmissionSpeed, lowFrequency, sensitivity, replication, method);
+		float[] parsedDescriptor = createDescriptor(transmissionSpeed, lowFrequency, sensitivity, replication, method);
 		//float[] parsedData = createData(bytes, method == BIT_BY_BIT ? 1 : transmissionSpeed, lowFrequency, sensitivity, replication);
 		
 		float[][] locator = createSineWave(parsedLocator, 1, lowFrequency, sensitivity, DIRECT);
-		//float[][] descriptor = createSineWave(parsedDescriptor, 1, lowFrequency, sensitivity, DIRECT);
+		float[][] descriptor = createSineWave(parsedDescriptor, 1, lowFrequency, sensitivity, DIRECT);
 		//float[][] data = createSineWave(parsedData, transmissionSpeed, lowFrequency, sensitivity, method);
-		float[][] transmission = new float[1][locator[0].length];
+		float[][] transmission = new float[1][locator[0].length + descriptor[0].length];
 		//float[][] transmission = new float[data.length][locator[0].length + descriptor[0].length + data[0].length];
 
 		for(int i = 0; i < locator.length; i++) {
@@ -319,14 +327,14 @@ public class SenderParser {
 				transmission[i][j] = locator[i][j];
 			}
 		}
-		/*
+		
 		for (int i = 0; i < descriptor.length; i++) {
 			for (int j = 0; j < descriptor[0].length; j++)
 			{
 				transmission[i][j+locator[0].length] = descriptor[i][j];
 			}
 		}
-
+		/*
 		for (int i = 0; i < data.length; i++) {
 			for (int j = 0; j < data[0].length; j++)
 			{
