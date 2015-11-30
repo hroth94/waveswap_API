@@ -1,11 +1,5 @@
 import java.io.IOException;
 
-import net.beadsproject.beads.data.SampleAudioFormat;
-import net.beadsproject.beads.data.audiofile.AudioFileType;
-import net.beadsproject.beads.data.audiofile.FileFormatException;
-import net.beadsproject.beads.data.audiofile.OperationUnsupportedException;
-import net.beadsproject.beads.data.audiofile.WavFileReaderWriter;
-
 public class Driver {
 	public static void main(String[] args) throws IOException
 	{
@@ -14,7 +8,7 @@ public class Driver {
 		SenderParser sender = new SenderParser();
 		// Put file bytes into fileData byte array
 		byte[] fileData = "TEST".getBytes();
-		sender.createAudioFile(fileData, "C:\\Users\\theholypiggy\\Documents\\Test.wav", 2, 14000, 500, 5512, SenderParser.BIT_BY_BIT);
+		sender.createAudioFile(fileData, "C:\\Users\\Matthew\\Documents\\Test.wav", 2, 14000, 500, 5512, SenderParser.BIT_BY_BIT);
 		//float[][] data = sender.createData(fileData, 1, 1, 1, 2);
 		//byte[] returnBytes = ReceiverParser.decodeData(data, fileData.length, 1, 1, 1);
 		
