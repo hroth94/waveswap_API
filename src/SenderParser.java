@@ -49,8 +49,6 @@ public class SenderParser {
 	    phiList.add(new Phi(0));
 	}
 	
-	
-	
 	public Phi getPhi(int index) {
 	    
 	    if(index >= phiList.size()) {
@@ -58,7 +56,6 @@ public class SenderParser {
 	            phiList.add(new Phi(0));
 	        }
 	    }
-	    
 	    
 	    return phiList.get(index);
 	}
@@ -186,7 +183,7 @@ public class SenderParser {
 	//The data in frequencies should have the replication amount reflect the 
 	//amount of time that the user would like to play the sound, so no need to worry
 	//about that.
-	private float[][] createSineWave(float[] frequencies, int transmissionSpeed, float lowFrequency, float sensitivity, int method)
+	private float[][] createSineWave(float[] frequencies, int transmissionSpeed, float lowFrequency, float sensitivity, int replication, int method)
 	{
 		if(method == DIRECT)
 		{
@@ -201,7 +198,7 @@ public class SenderParser {
 			//by createData(...) using a transmissonSpeed of 1.
 			//When using BIT_BY_BIT, "parameters" is: (float targetFrequency, int numChannels)
 			//Where "targetFrequency" is lowFrequency + sensitivity (since only that frequency should play)
-			return createSineWaveBitByBit(frequencies, lowFrequency, sensitivity, transmissionSpeed);
+			return createSineWaveBitByBit(frequencies, lowFrequency, sensitivity, transmissionSpeed, replication);
 		}
 		
 		if(method == CASCADE)
@@ -227,14 +224,18 @@ public class SenderParser {
 	{
 		float[][] buffer = new float[1][frequencies.length];
 		float lastFrequency = 0;
+		double timeStep = 1.0 / sampleRate;
+		double pi = 2 * Math.PI;
 		for(int i = 0; i < frequencies.length; i++) {
+	          Phi currentPhi = getPhi(DIRECT_PHI);
+
 		    if(frequencies[i] != lastFrequency) {
-		        //System.out.println("F: " + frequencies[i]);
+		       // System.out.println("F: " + frequencies[i]);
+		       // System.out.println("Phi value: " + currentPhi.getValue());
 		    }
 		    lastFrequency = frequencies[i];
-		    Phi currentPhi = getPhi(DIRECT_PHI);
-			currentPhi.addToValue(2*Math.PI*1.0/sampleRate*frequencies[i]);
-			buffer[0][i] = (float)Math.sin(currentPhi.getValue());
+			buffer[DIRECT_PHI][i] = (float)Math.sin(pi * frequencies[i] * currentPhi.getValue());
+			currentPhi.addToValue(timeStep);
 		}
 				
 		return buffer;
@@ -250,15 +251,18 @@ public class SenderParser {
 	 *           Output: sine wave of floats on "transmissionSpeed" channels 
 	 *           
 	 * Semantics: Outputs a sine wave with "transmissionSpeed" + 2 channels, where the 1st
-	 *            extra channel is used to signal "0" and the second extra channel is used
-	 *            to signal "repeat".  So, for example, a rawFrequencies input of:
+	 *            extra channel is used to signal repeat and the second extra channel is used
+	 *            to signal 0.  So, for example, a rawFrequencies input of:
 	 *            0 0 0 1 1 1 0 1
 	 *            Will become this float[] after createData with a transmission speed of 1: (for BIT_BY_BIT)
 	 *             (where lf = lowFrequency and s = sensitivity)
 	 *            lf+1*s lf lf+1*s lf+2*s lf lf+2*s lf+1*s lf+2*s
 	 *            Since lf = repeat, lf+1*s = 0, lf+2*s = 1
+	 *            Thus, bit by bit with a transmission speed would then turn that into:
+	 * Channel[0]:lf+1*s lf lf+1*s lf+2*s lf lf+2*s lf+1*s lf+2*s
+	 *              0    r    0      1    r    1      0      1
 	 */
-	private float[][] createSineWaveBitByBit(float[] rawFrequencies, float lowFrequency, float sensitivity, int numChannels)
+	private float[][] createSineWaveBitByBit(float[] rawFrequencies, float lowFrequency, float sensitivity, int numChannels, int replication)
 	{
 		int numFrequencies = rawFrequencies.length;
 		//Determine how much padding is needed for the channel conversion
@@ -272,66 +276,125 @@ public class SenderParser {
 		float prevRaw = 0;
 		for(int i = 0; i < numFrequencies; i++) {
 		    if(prevRaw != rawFrequencies[i])
-		    System.out.println("Raw: " + rawFrequencies[i]);
 		    prevRaw = rawFrequencies[i];
 			frequencies[i] = rawFrequencies[i];
 		}
 		for(int i = numFrequencies; i < totalFrequencies; i++) {
 			frequencies[i] = lowFrequency + sensitivity; //Correspond to 0
 		}
-		
-		float[][] buffer = new float[numChannels][frequenciesPerChannel];
+				
+		float[][] buffer = new float[numChannels][frequenciesPerChannel * replication];
 		
 		//Add the frequency to the buffer if it is equivalent to a "1", and not if it is equivalent
 		//to a "0".  If no frequencies are "1", play "lowFrequency" on Channel 0.  Channel 0 plays at "lowFrequency + sensitivity",
 		//and so on.  
-		int currentChannel = 0;
-		int currentFrequency = 0;
-		int numChannelsPlaying = 0;
-		float targetFrequency = lowFrequency + sensitivity * 2;
-		boolean wasTargetFrequency = false;
-		float prevFrequency = 0;
-		for(int i = 0; i < frequencies.length; i++)
+		int currentFrequencyIndex = 0;
+		//After createData with a transmission speed of 1, this value will equate to 1
+		//lowFrequency + sensitivity * 1 = 0
+		//lowFrequency + sensitivity * 0 = repeat
+		float rawTargetFrequency = lowFrequency + sensitivity * 2;
+		float repeatFrequency = lowFrequency;
+		float zeroFrequency   = lowFrequency + sensitivity;
+		//To check for repeat
+		float[] currentFrequencies  = new float[numChannels];
+		float[] previousFrequencies = new float[numChannels];
+		float previousFrequency = -999999f;
+		double pi = 2 * Math.PI;
+		double timeStep = 1.0 / sampleRate;
+		//iterate over the frequencies, going by "numChannels" since each
+		//lump is part of a single float[][] column
+		//****DEBUG****
+		boolean wasRepeat = false;
+		//*************
+		for(int i = 0; i < totalFrequencies; i += numChannels)
 		{
-			float frequency = frequencies[i];
-			float relevantFrequency;
-			
-			if(frequency == targetFrequency || (frequency == lowFrequency && wasTargetFrequency))
-			{
-				//Change frequency to channel equivalent.
-				//Channel 0: lowFrequency + sensitivity
-				//Channel 1: lowFrequency + 2*sensitivity, etc.
-				relevantFrequency = lowFrequency + sensitivity * (currentChannel + 1);
-				if(prevFrequency != relevantFrequency)
-				System.out.println("F[" + currentChannel + "]: " + relevantFrequency);
-				prevFrequency = relevantFrequency;
-				Phi currentPhi = getPhi(currentChannel);
-				currentPhi.addToValue(2*Math.PI*1.0/sampleRate*relevantFrequency);
-				buffer[currentChannel][currentFrequency] = (float)Math.sin(currentPhi.getValue());
-				wasTargetFrequency = true;
-				numChannelsPlaying += 1;
-			}
-			else
-			{
-				buffer[currentChannel][currentFrequency] = 0;
-				wasTargetFrequency = false;
+		    //Aggregate the data from frequencies into a more manageable section, as well
+		    //as removing the "repeatFrequency" that createData generates, considering
+		    //cross-"lump" would be difficult (lump as in set of numChannels frequencies)
+			for(int j = 0; j < numChannels; j++) {
+			    float currentFrequency = frequencies[i+j];
+			    if(currentFrequency == repeatFrequency) {
+			        currentFrequencies[j]  = previousFrequency;
+			    } else {
+			        currentFrequencies[j] = currentFrequency;
+			    }
+			    previousFrequency = currentFrequency;
 			}
 			
-			currentChannel++;
-			if(currentChannel >= numChannels)
-			{
-				if(numChannelsPlaying == 0) {
-				    Phi currentPhi = getPhi(currentChannel);
-				    if(prevFrequency != lowFrequency)
-				    System.out.println("F[!]: " + lowFrequency);
-				    prevFrequency = lowFrequency;
-					currentPhi.addToValue(2*Math.PI*1.0/sampleRate*(lowFrequency));
-					buffer[0][currentFrequency] = (float)Math.sin(currentPhi.getValue());
-				}
-				currentChannel = 0;
-				currentFrequency += 1;
-				numChannelsPlaying = 0;
+			//Determine whether this slice of frequencies is the same as the last,
+			//or is zero
+			boolean isRepeat = true;
+			boolean isZero = true;
+			for(int j = 0; j < numChannels; j++) {
+			    if(previousFrequencies[j] != currentFrequencies[j]) {
+			        isRepeat = false;
+			    }
+			    if(currentFrequencies[j] != zeroFrequency) {
+			        isZero = false;
+			    }
 			}
+						
+			if(isRepeat && !wasRepeat) {
+			    //In this case, the frequencies exactly match those played before.  Play the repeat
+			    //frequency (lowFrequency) on channel 0 and nothing else.
+                Phi currentPhi = getPhi(0);
+			    for(int r = 0; r < replication; r++) {
+			        buffer[0][currentFrequencyIndex*replication + r] = (float)Math.sin(pi * (repeatFrequency) * currentPhi.getValue());
+			        currentPhi.addToValue(timeStep);
+			    }
+			    for(int j = 1; j < numChannels; j++) {
+			        for(int r = 0; r < replication; r++) {
+			            buffer[j][currentFrequencyIndex*replication + r] = buffer[j][currentFrequencyIndex - 1]; //TODO: correct?
+			        }
+			    }
+			    System.out.println("Repeat");
+			    wasRepeat = true; //DEBUG
+			} else if(isZero) {
+			    //In this case, the frequencies all equal 0, and therefore need not be played.
+			    //Rather, the frequency (lowFrequency + sensitivity) is played instead
+			    Phi currentPhi = getPhi(0);
+			    for(int r = 0; r < replication; r++) {
+			        buffer[0][currentFrequencyIndex*replication + r] = (float)Math.sin(pi * (zeroFrequency) * currentPhi.getValue());
+			        currentPhi.addToValue(timeStep);
+			    }
+			    for(int j = 1; j < numChannels; j++) {
+			        for(int r = 0; r < replication; r++) {
+			            if(i != 0) { //Just in case the very first lump is 0
+			                buffer[j][currentFrequencyIndex*replication + r] = buffer[j][currentFrequencyIndex - 1];
+			            }
+			        }
+			    }
+			    System.out.println("All Zero");
+			    wasRepeat = false;
+			} else {
+			    //If you've reached this, then the current lump is unique and should play
+			    //all of its channels individually
+			    Phi currentPhi;
+			    for(int j = 0; j < numChannels; j++) {
+			        if(currentFrequencies[j] == rawTargetFrequency) {
+			            currentPhi = getPhi(j);
+			            float frequencyToPlay = lowFrequency + sensitivity * (j + 2);
+			            for(int r = 0; r < replication; r++) {
+			                buffer[j][currentFrequencyIndex*replication + r] = (float)Math.sin(pi * (frequencyToPlay) * currentPhi.getValue());
+			                currentPhi.addToValue(timeStep);
+			            }
+			            System.out.println("Channel[" + j + "] Frequency: " + frequencyToPlay);
+			        } else {
+			            for(int r = 0; r < replication; r++) {
+			                if( i != 0) {
+			                    buffer[j][currentFrequencyIndex] = buffer[j][currentFrequencyIndex - 1];
+			                }
+			            }
+                        System.out.println("Channel[" + j + "] Zero");
+			        }
+			    }
+			    wasRepeat = false;
+			}
+			
+			for(int j = 0; j < numChannels; j++) {
+			    previousFrequencies[j] = currentFrequencies[j];
+			}
+			currentFrequencyIndex += 1;
 		}
 		
 		return buffer;
@@ -359,20 +422,21 @@ public class SenderParser {
 		
 		float[] parsedLocator = createLocator(replication);
 		float[] parsedDescriptor = createDescriptor(transmissionSpeed, lowFrequency, sensitivity, replication, method);
-		float[] parsedData = createData(bytes, method == BIT_BY_BIT ? 1 : transmissionSpeed, lowFrequency, sensitivity, replication);
+		float[] parsedData = createData(bytes, method == BIT_BY_BIT ? 1 : transmissionSpeed, lowFrequency, sensitivity, method == BIT_BY_BIT ? 1 : replication);
 		
-		float[][] locator = createSineWave(parsedLocator, 1, lowFrequency, sensitivity, DIRECT);
-		float[][] descriptor = createSineWave(parsedDescriptor, 1, lowFrequency, sensitivity, DIRECT);
-		float[][] data = createSineWave(parsedData, transmissionSpeed, lowFrequency, sensitivity, method);
+		float[][] locator = createSineWave(parsedLocator, 1, lowFrequency, sensitivity, replication, DIRECT);
+		float[][] descriptor = createSineWave(parsedDescriptor, 1, lowFrequency, sensitivity, replication, DIRECT);
+		float[][] data = createSineWave(parsedData, transmissionSpeed, lowFrequency, sensitivity, replication, method);
+		float[][] transmission = new float[1][locator[0].length];
 		//float[][] transmission = new float[1][locator[0].length + descriptor[0].length];
-		float[][] transmission = new float[data.length][locator[0].length + descriptor[0].length + data[0].length];
+		//float[][] transmission = new float[data.length][locator[0].length + descriptor[0].length + data[0].length];
 
 		for(int i = 0; i < locator.length; i++) {
 			for(int j = 0; j < locator[i].length; j++) {
 				transmission[i][j] = locator[i][j];
 			}
 		}
-		
+		/*
 		for (int i = 0; i < descriptor.length; i++) {
 			for (int j = 0; j < descriptor[i].length; j++)
 			{
@@ -380,12 +444,12 @@ public class SenderParser {
 			}
 		}
 		
-		for (int i = 0; i < data.length; i++) {
+		/*for (int i = 0; i < data.length; i++) {
 			for (int j = 0; j < data[i].length; j++)
 			{
-				transmission[i][j+locator[i].length+descriptor[i].length] = data[i][j];
+				transmission[i][j+locator[0].length+descriptor[0].length] = data[i][j];
 			}
-		}
+		}*/
 
 		WavFileReaderWriter wfrw = new WavFileReaderWriter();
 		try {
