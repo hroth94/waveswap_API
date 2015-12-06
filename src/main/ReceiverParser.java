@@ -1,3 +1,4 @@
+package main;
 
 import java.io.*;
 import java.nio.ByteBuffer;
@@ -12,7 +13,7 @@ public class ReceiverParser {
 	private static final int BYTE_LENGTH = 8;
 	private static final int INT_LENGTH = 32;
 	
-	private enum Stage {
+	public enum Stage {
 		LOCATE, DETERMINE, DECODE, FINISH
 	}
 	
@@ -23,13 +24,15 @@ public class ReceiverParser {
 	private float lowFrequency;
 	private float sensitivity;
 	private int   method;
+	private int   size;
 	
 	private int   currentLocatorIndex; //Which part of SenderParser.transmissionLocator are we on?
-	private int   currentLocatorConvFreq; //Janky to facilitate other method
 	private float currentLocatorFrequency; //Frequency equivalent to above
 	
 	private ArrayList<Byte> currentDescriptorBytes;
 	private int             previousConvFreq; //If this is 1, then its a repeat
+	
+	private ArrayList<Byte> retrievedData;
 	
 	/**
 	 * NOTES:
@@ -46,12 +49,69 @@ public class ReceiverParser {
 		this.transmissionSpeed = 0;
 		this.lowFrequency = 0;
 		this.sensitivity = 0;
+		this.size = 0;
 		
 		this.currentLocatorIndex = 0;
 		this.currentLocatorFrequency = SenderParser.transmissionLocator[currentLocatorIndex];
-		this.currentLocatorConvFreq = 1; //Janky, corresponds to transmissionLocator values
 		
 		this.currentDescriptorBytes = new ArrayList<Byte>();
+		
+		this.retrievedData = new ArrayList<Byte>();
+	}
+	
+	public void setTs(int ts) { this.transmissionSpeed = ts; }
+	public void setLf(float lf) { this.lowFrequency = lf; }
+	public void setS(float s) { this.sensitivity = s; }
+	public void setM(int m) { this.method = m; }
+	public void setSize(int size) { this.size = size; }
+	public void setCurrentStage(Stage stage) { this.currentStage = stage; }
+	public void reset() {
+		this.currentStage = Stage.LOCATE;
+		this.currentLocatorIndex = 0;
+		this.currentLocatorFrequency = SenderParser.transmissionLocator[currentLocatorIndex];
+	}
+	public Stage getCurrentStage() { return this.currentStage; }
+	public int getTs() { return transmissionSpeed; }
+	public float getLf() { return lowFrequency; }
+	public float getS() { return sensitivity; }
+	public int getM() { return method; }
+	public int getSize() { return size; }
+	public byte[] getData() { 
+		Byte[] bytes = retrievedData.toArray(new Byte[retrievedData.size()]);
+		
+		byte[] toReturn = new byte[bytes.length];
+		
+		for(int i = 0; i < bytes.length; i++) {
+			toReturn[i] = bytes[i];
+		}
+		
+		return toReturn;
+	}
+	
+	public float[] getFrequencies(int value) {
+		int[] convertedFrequencies = new int[transmissionSpeed + 2];
+		int maxValue = (int)Math.round(Math.pow(2, transmissionSpeed + 1));
+		int currentIndex = 0;
+		
+		while(value > 0) {
+			if(value >= maxValue) {
+				convertedFrequencies[currentIndex] = maxValue;
+				value -= maxValue;
+				currentIndex += 1;
+			}
+			maxValue /= 2;
+		}
+		
+		float[] frequencies = new float[currentIndex];
+		for(int k = 0; k < currentIndex; k++) {
+			frequencies[k] = lowFrequency + sensitivity * (float)(Math.log10(convertedFrequencies[k]) / Math.log10(2));
+		}
+		
+		return frequencies;
+	}
+	
+	public boolean floatEquals(float a, float b) {
+		return a-Float.MIN_NORMAL <= b && a+Float.MIN_NORMAL >= b;
 	}
 	
 	public void receiveAudio(int[] convertedFrequencies) {
@@ -59,7 +119,7 @@ public class ReceiverParser {
 		case LOCATE: locateAudio(convertedFrequencies); break;
 		case DETERMINE: determineAudio(convertedFrequencies, 0); break;
 		case DECODE: decodeAudio(convertedFrequencies, 0); break;
-		case FINISH: finishAudio(convertedFrequencies, 0); break;
+		case FINISH: break;
 		}
 	}
 	
@@ -70,8 +130,19 @@ public class ReceiverParser {
 		for(int i = 0; i < convertedFrequencies.length; i++) {
 			//Get the first value in the the array
 			int currentValue = convertedFrequencies[i];
+			
+			float[] frequencies = getFrequencies(currentValue);
+			
+			//Just for now, may change
+			if(frequencies.length > 1) {
+				currentLocatorIndex = 0;
+				currentLocatorFrequency = SenderParser.transmissionLocator[currentLocatorIndex];
+			}
+			
+			float frequency = frequencies[0];
+			
 			//If that value 
-			if(currentValue == currentLocatorConvFreq) {
+			if(floatEquals(frequency, currentLocatorFrequency)) {
 				currentLocatorIndex += 1;
 				if(currentLocatorIndex >= SenderParser.transmissionLocator.length) {
 					//Found the entire locator
@@ -81,85 +152,130 @@ public class ReceiverParser {
 					return;
 				} else {
 					currentLocatorFrequency = SenderParser.transmissionLocator[currentLocatorIndex];
-					if(currentLocatorFrequency == 12) {
-						currentLocatorConvFreq = 1;
-					} else if(currentLocatorFrequency == 13){
-						currentLocatorConvFreq = 2;
-					}
 				}
 			} else {
 				//Here we can add fault tolerance; however, that's already built into
 				//the convertedFrequencies that I'm receiving so probably unnecessary.
 				currentLocatorIndex = 0;
 				currentLocatorFrequency = SenderParser.transmissionLocator[currentLocatorIndex];
-				currentLocatorConvFreq = 1;
 			}
 		}
 		//UNLOCATED
 	}
 	
+	public static String byteToString(byte b) {
+        String str = "";
+        int mask = 1 << 7;
+        
+        for(int i = 0; i < 8; i++) {
+            if((b & mask) != 0) {
+                str += "1";
+            } else {
+                str += "0";
+            }
+            mask = mask >>> 1;
+        }
+        
+        return str;
+    }
+	
 	public void determineAudio(int[] convertedFrequencies, int index) {
 		if(index >= convertedFrequencies.length) return;
 		float[][] frequencies = new float[1][convertedFrequencies.length];
 		
-		for(int i = index; i < convertedFrequencies.length; i++) {
-			int currentConvertedFrequency = convertedFrequencies[i];
-			
-			if(currentConvertedFrequency == 1) {
-				//This is lowFrequency
-				frequencies[0][i] = 12000;
-			}
-			else if(currentConvertedFrequency == 2) {
-				frequencies[0][i] = 12500;
-			}
-			else if(currentConvertedFrequency == 4) {
-				frequencies[0][i] = 13000;
-			}
+		for(int k = index, currentIndex = 0; k < convertedFrequencies.length; k++, currentIndex++) {
+			frequencies[0][currentIndex] = getFrequencies(convertedFrequencies[k])[0];
 		}
 		
-		byte[] decoded = decodeData(frequencies, 16, 1, 12000, 500);
+		byte[] decoded = decodeData(frequencies, 20, 1, 14000, 500);
 		
-		if(lastDecodeBytes >= 16) {
+		if(lastDecodeBytes >= 20) {
 			//Next Stage, Success!
 			ByteBuffer buff = ByteBuffer.wrap(decoded);
 			transmissionSpeed = buff.getInt();
 			lowFrequency = buff.getFloat();
 			sensitivity = buff.getFloat();
 			method = buff.getInt();
+			size = buff.getInt();
+			
+			currentStage = Stage.DECODE;
+			decodeAudio(convertedFrequencies, index += 20 * 8);
 		} else {
 			//Can do this later, should barely ever happen anyway
 		}
 	}
 	
+	//Look for the descriptor at the end of the decode
 	public void decodeAudio(int[] convertedFrequencies, int index) {
+		currentLocatorIndex = 0;
+		currentLocatorFrequency = SenderParser.transmissionLocator[currentLocatorIndex];
+		float[] data = new float[convertedFrequencies.length];
+		int   currentDataIndex = 0;
+		int i, j;
+		for(i = index, j = 0;
+				i < convertedFrequencies.length &&
+				j < (size * 8 + SenderParser.transmissionLocator.length);
+				i++, j++) {
+			//Get the first value in the the array
+			int currentValue = convertedFrequencies[i];
+						
+			float[] frequencies = getFrequencies(currentValue);
+			
+			//Just for now, may change
+			if(frequencies.length > 1) {
+				System.out.println("Over One");
+				currentLocatorIndex = 0;
+				currentLocatorFrequency = SenderParser.transmissionLocator[currentLocatorIndex];
+			}
+			
+			float frequency = frequencies[0];
+						
+			//If that value 
+			if(floatEquals(frequency, currentLocatorFrequency)) {
+				currentLocatorIndex += 1;
+				if(currentLocatorIndex >= SenderParser.transmissionLocator.length) {
+					//Found the entire locator
+					currentStage = Stage.FINISH;
+					//HERE IS WHERE YOU SHOULD PRINT A STATEMENT SAYING DATA FOUND
+					finishAudio(data);
+					currentLocatorIndex = 0;
+					break;
+				} else {
+					currentLocatorFrequency = SenderParser.transmissionLocator[currentLocatorIndex];
+				}
+			} else {
+				//Here we can add fault tolerance; however, that's already built into
+				//the convertedFrequencies that I'm receiving so probably unnecessary.
+				for(int k = 0; k < currentLocatorIndex; k++) {
+					data[currentDataIndex + k] = SenderParser.transmissionLocator[k];
+				}
+				currentDataIndex += currentLocatorIndex;
+				data[currentDataIndex] = frequency;
+				currentDataIndex += 1;
+				
+				currentLocatorIndex = 0;
+				currentLocatorFrequency = SenderParser.transmissionLocator[currentLocatorIndex];
+			}
+		}
+				
+		float[][] frequencies = new float[1][currentDataIndex];
+		for(int k = 0; k < currentDataIndex; k++) {
+			frequencies[0][k] = data[k];
+		}
 		
+		byte[] bytes = decodeData(frequencies, currentDataIndex / 8, transmissionSpeed, lowFrequency, sensitivity);
+		
+		for(int k = 0; k < bytes.length; k++) {
+			retrievedData.add(bytes[k]);
+		}
+		
+		if(j < size) {
+			//Did not get full transmission
+		}
 	}
 	
-	public void finishAudio(int[] convertedFrequencies, int index) {
+	public void finishAudio(float[] data) {
 		
-	}
-	
-	/**
-	 * Extract the frequencies detected when given a certain value.  This method assumes
-	 * the following value conversion for a BIT_BY_BIT transmission with a transmission
-	 * speed of 2, where the "ground" frequency of (lowFrequency) equates to all 0's:
-	 *                                |  
-	 * lowFrequency + sensitivity * 2 |----------- = 2^2, Second bit (b)
-	 *                                |
-	 * lowFrequency + sensitivity     |----------- = 2^1, First bit  (a)
-	 *                                |
-	 * lowFrequency                   |----------- = 2^0
-	 *                                |___________
-	 * Where the value sent here is "ab".
-	 * Thus, the highest value possible in this scenario would be 6,
-	 * or (2^(transmission speed) - 1) * 2, where a value of:
-	 * 1: 00 3: X
-	 * 2: 10 5: X
-	 * 4: 01 
-	 * 6: 11
-	 */
-	public float[] extractFrequenciesBitByBit(int value) {
-		return null;
 	}
 	
 	private int lastDecodeBytes;
@@ -193,14 +309,10 @@ public class ReceiverParser {
 		for (int index = 0; index < audioMatrix[0].length; index++) {
 			currentFrequency = audioMatrix[0][index];
 			
-			if(currentFrequency == lowFrequency)
-			{
-				//This means that there is a repeated bit sequence, so set
-				//the frequency to the frequency BEFORE the lowFrequency
-				currentFrequency = previousFrequency;
-				previousFrequency = lowFrequency;
-			}
-			else if(currentFrequency == previousFrequency)
+			float relevantFrequency;
+			
+			
+			if(currentFrequency == previousFrequency)
 			{
 				//This means that there is a repeated frequency, which is
 				//regulated by "replicationAmount" in SenderParser, and does
@@ -209,11 +321,21 @@ public class ReceiverParser {
 				//from the floats that surround it.
 				continue;
 			}
+			else if(currentFrequency == lowFrequency)
+			{
+				//This means that there is a repeated bit sequence, so set
+				//the frequency to the frequency BEFORE the lowFrequency
+				relevantFrequency = previousFrequency;
+			}
+			else
+			{
+				relevantFrequency = currentFrequency;
+			}
 			
 			// Should be an exact division
-			int currentValue = Math.round((currentFrequency - lowFrequency - sensitivity) / sensitivity); 
+			int currentValue = Math.round((relevantFrequency - lowFrequency - sensitivity) / sensitivity); 
 			int currentValueSize = transmissionSpeed;
-
+			
 			// Fill up bytes until you no longer can
 			while (currentValueSize >= currentByteBitsRemaining) {
 				// Construct a byte whose value is the necessary bits in "currentValue"
@@ -227,7 +349,7 @@ public class ReceiverParser {
 
 				// Add to the array of bytes
 				bytes[currentByteIndex] = currentByte;
-				
+								
 				lastDecodeBytes += 1;
 
 				// Maintain variables for correct execution
@@ -252,6 +374,11 @@ public class ReceiverParser {
 				currentByte |= leftShiftedCurrentValue;
 				// Maintain variables for correct execution
 				currentByteBitsRemaining -= currentValueSize;
+			}
+			previousFrequency = currentFrequency;
+			
+			if(currentByteIndex >= size) {
+				break;
 			}
 		}
 		return bytes;

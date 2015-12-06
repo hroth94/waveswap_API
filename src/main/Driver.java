@@ -1,3 +1,4 @@
+package main;
 import java.io.IOException;
 
 public class Driver {
@@ -8,7 +9,7 @@ public class Driver {
 		SenderParser sender = new SenderParser();
 		// Put file bytes into fileData byte array
 		byte[] fileData = "TEST".getBytes();
-		sender.createAudioFile(fileData, "C:\\Users\\Matthew\\Documents\\Test.wav", 1, 14000, 500, 5512, SenderParser.BIT_BY_BIT);
+		sender.createAudioFile(fileData, "C:\\Users\\theholypiggy\\Documents\\Test.wav", 1, 14000, 500, /*5512*/22050, SenderParser.BIT_BY_BIT);
 		
 		/**
 		 * For this transmission testing, using the following values for the audio file:

@@ -1,3 +1,4 @@
+package main;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -77,14 +78,15 @@ public class SenderParser {
 		return data;
 	}
 	
-	public float[] createDescriptor(int transmissionSpeed, float lowFrequency, float sensitivity, int replicationAmount, int method) {
+	public float[] createDescriptor(int transmissionSpeed, float lowFrequency, float sensitivity, int replicationAmount, int method, int size) {
 		//number of bits to send = 32 + 32 + 32 + 32
-		byte[] bytes = new byte[16];		
+		byte[] bytes = new byte[20];		
 		
 		byte[] transmissionSpeedBytes = ByteBuffer.allocate(4).putInt(transmissionSpeed).array();
 		byte[] lowFrequencyBytes = ByteBuffer.allocate(4).putFloat(lowFrequency).array();
 		byte[] sensitivityBytes = ByteBuffer.allocate(4).putFloat(sensitivity).array();
 		byte[] methodBytes = ByteBuffer.allocate(4).putInt(method).array();
+		byte[] sizeBytes = ByteBuffer.allocate(4).putInt(size).array();
 		
 		for(int i = 0; i < transmissionSpeedBytes.length; i++) {
 			bytes[i] = transmissionSpeedBytes[i];
@@ -97,6 +99,9 @@ public class SenderParser {
 		}
 		for(int i = 0; i < methodBytes.length; i++) {
 			bytes[i+transmissionSpeedBytes.length+lowFrequencyBytes.length+sensitivityBytes.length] = methodBytes[i];
+		}
+		for(int i = 0; i < sizeBytes.length; i++) {
+			bytes[i+transmissionSpeedBytes.length+lowFrequencyBytes.length+sensitivityBytes.length+methodBytes.length] = sizeBytes[i];
 		}
 		
 		return createData(bytes, 1, lowFrequency, sensitivity, replicationAmount);
@@ -227,12 +232,13 @@ public class SenderParser {
 		double timeStep = 1.0 / sampleRate;
 		double pi = 2 * Math.PI;
 		for(int i = 0; i < frequencies.length; i++) {
-	          Phi currentPhi = getPhi(DIRECT_PHI);
+	        Phi currentPhi = getPhi(DIRECT_PHI);
 
 		    if(frequencies[i] != lastFrequency) {
-		       // System.out.println("F: " + frequencies[i]);
-		       // System.out.println("Phi value: " + currentPhi.getValue());
+		        System.out.println("F: " + frequencies[i]);
+		        System.out.println("Phi value: " + currentPhi.getValue());
 		    }
+		    
 		    lastFrequency = frequencies[i];
 			buffer[DIRECT_PHI][i] = (float)Math.sin(pi * frequencies[i] * currentPhi.getValue());
 			currentPhi.addToValue(timeStep);
@@ -421,22 +427,22 @@ public class SenderParser {
 	    resetPhiList();
 		
 		float[] parsedLocator = createLocator(replication);
-		float[] parsedDescriptor = createDescriptor(transmissionSpeed, lowFrequency, sensitivity, replication, method);
+		float[] parsedDescriptor = createDescriptor(transmissionSpeed, lowFrequency, sensitivity, replication, method, bytes.length);
 		float[] parsedData = createData(bytes, method == BIT_BY_BIT ? 1 : transmissionSpeed, lowFrequency, sensitivity, method == BIT_BY_BIT ? 1 : replication);
-		
+	
 		float[][] locator = createSineWave(parsedLocator, 1, lowFrequency, sensitivity, replication, DIRECT);
 		float[][] descriptor = createSineWave(parsedDescriptor, 1, lowFrequency, sensitivity, replication, DIRECT);
 		float[][] data = createSineWave(parsedData, transmissionSpeed, lowFrequency, sensitivity, replication, method);
-		float[][] transmission = new float[1][locator[0].length];
+		//float[][] transmission = new float[1][locator[0].length];
 		//float[][] transmission = new float[1][locator[0].length + descriptor[0].length];
-		//float[][] transmission = new float[data.length][locator[0].length + descriptor[0].length + data[0].length];
+		float[][] transmission = new float[data.length][2 * locator[0].length + descriptor[0].length + data[0].length];
 
 		for(int i = 0; i < locator.length; i++) {
 			for(int j = 0; j < locator[i].length; j++) {
 				transmission[i][j] = locator[i][j];
 			}
 		}
-		/*
+		
 		for (int i = 0; i < descriptor.length; i++) {
 			for (int j = 0; j < descriptor[i].length; j++)
 			{
@@ -444,12 +450,18 @@ public class SenderParser {
 			}
 		}
 		
-		/*for (int i = 0; i < data.length; i++) {
+		for (int i = 0; i < data.length; i++) {
 			for (int j = 0; j < data[i].length; j++)
 			{
 				transmission[i][j+locator[0].length+descriptor[0].length] = data[i][j];
 			}
-		}*/
+		}
+		
+		for(int i = 0; i < locator.length; i++) {
+			for(int j = 0; j < locator[i].length; j++) {
+				transmission[i][j+locator[0].length + descriptor[0].length + data[0].length] = locator[i][j];
+			}
+		}
 
 		WavFileReaderWriter wfrw = new WavFileReaderWriter();
 		try {
